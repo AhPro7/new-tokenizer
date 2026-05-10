@@ -118,7 +118,7 @@ class AudioLogger:
 # ============================================================
 def train(
     max_steps=100_000,
-    batch_size=4,
+    batch_size=2,
     segment_sec=4.0,
     lr_g=3e-4,
     lr_d=1e-4,
