@@ -251,8 +251,6 @@ def train(
             d_loss_val = d_loss.item()
             del dr2, df2, d_loss
             
-        del x_real
-
         # === Logging ===
         unique_codes = indices.unique().numel()
         log = {"loss/total": g_loss_val, "loss/l1": l_rec_val,
