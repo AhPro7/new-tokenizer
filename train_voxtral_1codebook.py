@@ -304,7 +304,7 @@ def train(
 if __name__ == "__main__":
     model = train(
         max_steps=100_000,
-        batch_size=4,
+        batch_size=8,
         segment_sec=4.0,
         hidden_dim=512,
         latent_dim=256,
@@ -312,5 +312,5 @@ if __name__ == "__main__":
         log_every=50,
         save_every=5000,
         audio_log_every=500,
-        disc_start_step=10_000,
+        disc_start_step=2000,
     )
