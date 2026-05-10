@@ -222,6 +222,14 @@ def train(
         scaler_g.step(opt_g)
         scaler_g.update()
 
+        # extract scalar values for logging
+        g_loss_val = g_loss.item()
+        l_rec_val = l_rec.item()
+        l_stft_val = l_stft.item()
+        l_feat_val = l_feat.item()
+        l_vq_val = l_vq.item()
+        l_adv_val = l_adv.item() if torch.is_tensor(l_adv) else l_adv
+
         # free memory
         del out, dr, df, fmaps_real, fmaps_fake, logits_fake, g_loss, l_rec, l_stft, l_feat, l_vq, l_adv
 
@@ -245,12 +253,11 @@ def train(
             
         del x_real
 
-
         # === Logging ===
         unique_codes = indices.unique().numel()
-        log = {"loss/total": g_loss.item(), "loss/l1": l_rec.item(),
-               "loss/stft": l_stft.item(), "loss/feat": l_feat.item(),
-               "loss/vq": l_vq.item(), "loss/adv_g": l_adv.item() if torch.is_tensor(l_adv) else 0,
+        log = {"loss/total": g_loss_val, "loss/l1": l_rec_val,
+               "loss/stft": l_stft_val, "loss/feat": l_feat_val,
+               "loss/vq": l_vq_val, "loss/adv_g": l_adv_val,
                "loss/disc": d_loss_val, "loss/rec_weight": rec_w,
                "codebook/utilization_pct": unique_codes / codebook_size * 100}
 
