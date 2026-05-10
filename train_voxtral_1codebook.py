@@ -155,6 +155,9 @@ def train(
     opt_g = optim.AdamW(model.parameters(), lr=lr_g, betas=(0.8, 0.99), weight_decay=1e-4)
     opt_d = optim.AdamW(disc.parameters(), lr=lr_d, betas=(0.8, 0.99), weight_decay=1e-4)
 
+    scaler_g = torch.amp.GradScaler('cuda')
+    scaler_d = torch.amp.GradScaler('cuda')
+
     # --- Resume ---
     step = 0
     if resume_path and os.path.exists(resume_path):
@@ -191,41 +194,57 @@ def train(
 
         # === Generator ===
         model.train()
-        out = model(x_real)
-        x_hat, vq_loss, indices = out["x_hat"], out["vq_loss"], out["indices"]
-
-        disc.eval()
-        with torch.no_grad():
-            dr = disc(x_real)
-        df = disc(x_hat)
-        fmaps_real = [fm for _, fm in dr]
-        fmaps_fake = [fm for _, fm in df]
-        logits_fake = [lg for lg, _ in df]
-
-        l_rec, rec_w = reconstruction_loss(x_real, x_hat, step, decay_steps=rec_decay_steps)
-        l_stft = rec_w * stft_magnitude_loss(x_real, x_hat)
-        l_feat = w_feat * feature_matching_loss(fmaps_real, fmaps_fake)
-        l_vq = w_vq * vq_loss
-        l_adv = w_adv * generator_adversarial_loss(logits_fake) if step >= disc_start_step else x_real.new_zeros(())
-
-        g_loss = l_rec + l_stft + l_feat + l_vq + l_adv
         opt_g.zero_grad()
-        g_loss.backward()
+        
+        with torch.autocast(device_type='cuda', dtype=torch.float16):
+            out = model(x_real)
+            x_hat, vq_loss, indices = out["x_hat"], out["vq_loss"], out["indices"]
+
+            disc.eval()
+            with torch.no_grad():
+                dr = disc(x_real)
+            df = disc(x_hat)
+            fmaps_real = [fm for _, fm in dr]
+            fmaps_fake = [fm for _, fm in df]
+            logits_fake = [lg for lg, _ in df]
+
+            l_rec, rec_w = reconstruction_loss(x_real, x_hat, step, decay_steps=rec_decay_steps)
+            l_stft = rec_w * stft_magnitude_loss(x_real, x_hat)
+            l_feat = w_feat * feature_matching_loss(fmaps_real, fmaps_fake)
+            l_vq = w_vq * vq_loss
+            l_adv = w_adv * generator_adversarial_loss(logits_fake) if step >= disc_start_step else x_real.new_zeros(())
+
+            g_loss = l_rec + l_stft + l_feat + l_vq + l_adv
+            
+        scaler_g.scale(g_loss).backward()
+        scaler_g.unscale_(opt_g)
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt_g.step()
+        scaler_g.step(opt_g)
+        scaler_g.update()
+
+        # free memory
+        del out, dr, df, fmaps_real, fmaps_fake, logits_fake, g_loss, l_rec, l_stft, l_feat, l_vq, l_adv
 
         # === Discriminator ===
         d_loss_val = 0.0
         if step >= disc_start_step:
             disc.train()
-            dr2 = disc(x_real)
-            df2 = disc(x_hat.detach())
-            d_loss = discriminator_loss([l for l,_ in dr2], [l for l,_ in df2])
             opt_d.zero_grad()
-            d_loss.backward()
+            with torch.autocast(device_type='cuda', dtype=torch.float16):
+                dr2 = disc(x_real)
+                df2 = disc(x_hat.detach())
+                d_loss = discriminator_loss([l for l,_ in dr2], [l for l,_ in df2])
+                
+            scaler_d.scale(d_loss).backward()
+            scaler_d.unscale_(opt_d)
             nn.utils.clip_grad_norm_(disc.parameters(), 1.0)
-            opt_d.step()
+            scaler_d.step(opt_d)
+            scaler_d.update()
             d_loss_val = d_loss.item()
+            del dr2, df2, d_loss
+            
+        del x_real
+
 
         # === Logging ===
         unique_codes = indices.unique().numel()
